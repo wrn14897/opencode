@@ -150,7 +150,18 @@ const useMcpToggleMutation = () => {
         return
       }
       if (status?.status === "needs_auth") {
-        await sdk.client.mcp.auth.authenticate({ name })
+        // Server-side has already detected the MCP needs OAuth. Start
+        // the dance and open the authorize URL in a new tab — the
+        // OAuth provider redirects back to our /mcp/oauth/callback
+        // endpoint when the user consents, after which the status
+        // flips to "connected" automatically. Native
+        // `mcp.auth.authenticate` (which spawns a system browser via
+        // `open`) doesn't work in our containerised deployment.
+        const resp = await sdk.client.mcp.auth.start({ name })
+        const url = (resp as any)?.data?.authorizationUrl ?? (resp as any)?.authorizationUrl
+        if (typeof url === "string" && url.length > 0) {
+          window.open(url, "_blank", "noopener,noreferrer")
+        }
         return
       }
       await sdk.client.mcp.connect({ name })
