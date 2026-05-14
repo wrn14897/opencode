@@ -810,7 +810,18 @@ export const layer = Layer.effect(
 
       const transport = new StreamableHTTPClientTransport(url, { authProvider })
 
-      return yield* Effect.tryPromise({
+      // Capture an Effect bridge so the background callback handler can
+      // run finishAuth in a fresh Effect runtime with this layer's
+      // context. Used by the web-driven OAuth flow: the UI calls
+      // startAuth and opens the authorizationUrl in a new tab. When the
+      // OAuth provider redirects back to our callback server, we want
+      // finishAuth to fire automatically — without requiring the UI to
+      // poll or to POST /auth/callback explicitly. (The TUI flow's
+      // `authenticate` registers its own waitForCallback and does not
+      // share state with this one; they're mutually exclusive UX-wise.)
+      const bridge = yield* EffectBridge.make()
+
+      const result = yield* Effect.tryPromise({
         try: () => {
           const client = new Client({ name: "opencode", version: InstallationVersion })
           return client
@@ -827,6 +838,33 @@ export const layer = Layer.effect(
           return Effect.die(error)
         }),
       )
+
+      // If we actually need user-driven OAuth (authorizationUrl is set),
+      // register a one-shot waiter on the callback server so the
+      // provider's redirect can match our state, and on success fire
+      // finishAuth in the background. If the caller (TUI) prefers to
+      // drive it themselves via `authenticate`, that path will replace
+      // this waiter when it calls waitForCallback again.
+      if (result.authorizationUrl) {
+        const callbackPromise = McpOAuthCallback.waitForCallback(oauthState, mcpName)
+        callbackPromise
+          .then(async (code) => {
+            try {
+              await bridge.promise(finishAuth(mcpName, code))
+              log.info("background finishAuth completed", { mcpName })
+            } catch (err) {
+              log.error("background finishAuth failed", { mcpName, error: err })
+            }
+          })
+          .catch((err) => {
+            // Timeout / cancellation. Not an error per se; auth was just
+            // not completed within the window. The next `connect` /
+            // `startAuth` call will set up a fresh state.
+            log.info("oauth callback waiter resolved without code", { mcpName, error: err })
+          })
+      }
+
+      return result
     })
 
     const authenticate = Effect.fn("MCP.authenticate")(function* (mcpName: string) {
