@@ -139,8 +139,13 @@ function handleRequest(req: import("http").IncomingMessage, res: import("http").
 }
 
 export async function ensureRunning(redirectUri?: string): Promise<void> {
+  // Allow operators to inject a workspace-wide redirect URI via env when
+  // the MCP entry itself omits oauth.redirectUri. This keeps cloud /
+  // containerised deployments from having to repeat the same URI on every
+  // MCP entry — see McpOAuthProvider.redirectUrl for the matching getter.
+  const effective = redirectUri ?? process.env["OPENCODE_MCP_OAUTH_REDIRECT_URI"]
   // Parse the redirect URI to get port and path (uses defaults if not provided)
-  const { port, path } = parseRedirectUri(redirectUri)
+  const { port, path } = parseRedirectUri(effective)
 
   // If server is running on a different port/path, stop it first
   if (server && (currentPort !== port || currentPath !== path)) {

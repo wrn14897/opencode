@@ -39,6 +39,13 @@ export class McpOAuthProvider implements OAuthClientProvider {
     if (this.config.redirectUri) {
       return this.config.redirectUri
     }
+    // Cloud / containerised deployments: allow operators to inject a
+    // workspace-wide default redirect URI via env without forcing every
+    // MCP entry to repeat the same string.
+    const envFallback = process.env["OPENCODE_MCP_OAUTH_REDIRECT_URI"]
+    if (envFallback) {
+      return envFallback
+    }
     const port = this.config.callbackPort ?? OAUTH_CALLBACK_PORT
     return `http://127.0.0.1:${port}${OAUTH_CALLBACK_PATH}`
   }
