@@ -1,0 +1,51 @@
+# Fork-only Dockerfile that ships the patched opencode binary on a
+# debian-slim (glibc) base.
+#
+# Why this exists alongside the upstream `Dockerfile` (Alpine/musl):
+# opencode bundles native libraries (PTY, sqlite-bindings, etc.) inside
+# its compiled binary. Those bundled .so files are linked against glibc
+# and resolve `gnu_get_libc_version` at dlopen time. Under musl the
+# symbol does not exist and bun's FFI loader fails with
+#   ERR_DLOPEN_FAILED ... gnu_get_libc_version: symbol not found
+# the first time a code path triggers the bundled load (POST /pty,
+# certain session lifecycle hooks, etc.). The HTTP server boots fine
+# but starts returning 500s as soon as anything exercises that loader.
+# Even `apk add gcompat libc6-compat` doesn't supply the symbol.
+#
+# Switching the base to debian-slim resolves the entire class of
+# failures because the bundled libs find their expected glibc symbols.
+#
+# We use the non-baseline glibc dist for arm64 and the baseline
+# (non-AVX2) glibc dist for amd64 so the image runs on older x86_64
+# CPUs that lack AVX2 and on qemu, which doesn't expose AVX2 even on
+# capable host CPUs.
+#
+# Tag layout matches the upstream Dockerfile: the build emits a
+# multi-arch manifest list (linux/amd64 + linux/arm64) so downstream
+# consumers just bump the tag/digest.
+FROM debian:bookworm-slim AS base
+
+ARG BUN_RUNTIME_TRANSPILER_CACHE_PATH=0
+ENV BUN_RUNTIME_TRANSPILER_CACHE_PATH=${BUN_RUNTIME_TRANSPILER_CACHE_PATH}
+
+# Userland required by opencode at runtime:
+#   - ca-certificates: TLS to model + MCP endpoints
+#   - ripgrep: built-in file search tool
+#   - tini: PID 1 reaper (opencode spawns child processes — PTY etc.)
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates \
+      ripgrep \
+      tini \
+ && rm -rf /var/lib/apt/lists/*
+
+FROM base AS build-amd64
+COPY dist/opencode-linux-x64-baseline/bin/opencode /usr/local/bin/opencode
+
+FROM base AS build-arm64
+COPY dist/opencode-linux-arm64/bin/opencode /usr/local/bin/opencode
+
+ARG TARGETARCH
+FROM build-${TARGETARCH}
+RUN opencode --version
+ENTRYPOINT ["/usr/bin/tini", "--", "opencode"]
