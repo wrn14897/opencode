@@ -215,7 +215,22 @@ export function parseRedirectUri(redirectUri?: string): { port: number; path: st
 
   try {
     const url = new URL(redirectUri)
-    const port = url.port ? parseInt(url.port, 10) : url.protocol === "https:" ? 443 : 80
+    // Bind-port env override. When the redirect URI omits an explicit
+    // port (typical for cloud deploys behind a reverse proxy on 443),
+    // operators can pin the local bind port via
+    // OPENCODE_MCP_OAUTH_CALLBACK_PORT. The proxy then forwards
+    // /mcp/oauth/callback to that port inside the container. Without
+    // this fallback the listener tries 443 (because the URL is
+    // https://…), which doesn't match what the cluster Service routes
+    // to and breaks every callback in containerised deployments.
+    const envPort = process.env["OPENCODE_MCP_OAUTH_CALLBACK_PORT"]
+    const port = url.port
+      ? parseInt(url.port, 10)
+      : envPort
+        ? parseInt(envPort, 10)
+        : url.protocol === "https:"
+          ? 443
+          : 80
     const path = url.pathname || OAUTH_CALLBACK_PATH
     return { port, path }
   } catch {
