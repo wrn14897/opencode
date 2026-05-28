@@ -1,0 +1,85 @@
+# Publish patched opencode image to ghcr.io/wrn14897/opencode.
+#
+# Triggers:
+#   - push to opencode-cloud-agent/ee (auto-publish on every rebase / new patch)
+#   - workflow_dispatch (manual republish)
+#
+# Tags pushed (always both):
+#   - ee               (floating; EKS prod contract — opencode-cloud-agents CD
+#                       pulls this on every runtime rebuild)
+#   - ee-<short-sha>   (immutable; rollback target + the version downstream
+#                       OSS-default Dockerfile pins point at)
+#
+# Built from packages/opencode/Dockerfile.glibc, with binaries produced by
+# packages/opencode/script/build.ts. Multi-arch (linux/amd64 + linux/arm64).
+#
+# FIRST-RUN NOTE: GHCR creates the package as PRIVATE on first publish. After
+# the first successful run, flip visibility to public (or grant pull access
+# to the org/team that runs EKS deploys) at:
+#   https://github.com/users/wrn14897/packages/container/opencode/settings
+
+name: publish-ee
+
+on:
+  push:
+    branches: [opencode-cloud-agent/ee]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write   # required to push to ghcr.io/wrn14897/opencode
+
+concurrency:
+  group: publish-ee
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: opencode-cloud-agent/ee
+          fetch-depth: 1
+
+      - uses: ./.github/actions/setup-bun
+
+      # Cross-compile both linux targets (x64-baseline + arm64) referenced by
+      # Dockerfile.glibc. Bun's compile target list handles cross-arch
+      # natively — no QEMU needed at THIS step.
+      - name: Build opencode binaries (cross-compile)
+        run: bun packages/opencode/script/build.ts
+        env:
+          OPENCODE_VERSION: ${{ github.sha }}
+
+      # QEMU is needed for the docker build step, where Dockerfile.glibc's
+      # `RUN opencode --version` smoke test must execute the arm64 binary.
+      # Without it, the arm64 stage fails on `exec format error`.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags
+        id: tags
+        run: |
+          SHORT_SHA="$(git rev-parse --short HEAD)"
+          IMAGE="ghcr.io/${{ github.repository_owner }}/opencode"
+          echo "tags=${IMAGE}:ee,${IMAGE}:ee-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Build + push multi-arch
+        uses: docker/build-push-action@v6
+        with:
+          context: packages/opencode
+          file: packages/opencode/Dockerfile.glibc
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}

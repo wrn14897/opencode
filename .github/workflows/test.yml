@@ -4,13 +4,22 @@ on:
   push:
     branches:
       - dev
+      # Run unit + e2e on every push to the long-lived fork patch branch
+      # (rebases on upstream dev, new patches) so regressions surface
+      # without needing a PR.
+      - opencode-cloud-agent/ee
   pull_request:
   workflow_dispatch:
 
 concurrency:
   # Keep every run on dev so cancelled checks do not pollute the default branch
   # commit history. PRs and other branches still share a group and cancel stale runs.
-  group: ${{ case(github.ref == 'refs/heads/dev', format('{0}-{1}', github.workflow, github.run_id), format('{0}-{1}', github.workflow, github.event.pull_request.number || github.ref)) }}
+  #
+  # GH Actions has no built-in `case()` function — upstream's syntax doesn't
+  # evaluate here. Rewrite as a standard ternary on the truthy && / || idiom:
+  # when on dev, group by run_id (so each run is its own group, never
+  # cancelled); otherwise group by PR number or ref (so stale runs cancel).
+  group: ${{ github.ref == 'refs/heads/dev' && format('{0}-{1}', github.workflow, github.run_id) || format('{0}-{1}', github.workflow, github.event.pull_request.number || github.ref) }}
   cancel-in-progress: true
 
 permissions:
@@ -28,9 +37,12 @@ jobs:
       matrix:
         settings:
           - name: linux
-            host: blacksmith-4vcpu-ubuntu-2404
-          - name: windows
-            host: blacksmith-4vcpu-windows-2025
+            host: ubuntu-24.04
+          # Windows unit run temporarily disabled on the fork until we
+          # validate it on GH-hosted windows-2025 runners. Re-add when
+          # ready:
+          #   - name: windows
+          #     host: windows-2025
     runs-on: ${{ matrix.settings.host }}
     defaults:
       run:
@@ -100,9 +112,12 @@ jobs:
       matrix:
         settings:
           - name: linux
-            host: blacksmith-4vcpu-ubuntu-2404
-          - name: windows
-            host: blacksmith-4vcpu-windows-2025
+            host: ubuntu-24.04
+          # Windows e2e run temporarily disabled on the fork until we
+          # validate Playwright on GH-hosted windows-2025 runners.
+          # Re-add when ready:
+          #   - name: windows
+          #     host: windows-2025
     runs-on: ${{ matrix.settings.host }}
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright-browsers
