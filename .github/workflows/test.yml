@@ -38,8 +38,11 @@ jobs:
         settings:
           - name: linux
             host: ubuntu-24.04
-          - name: windows
-            host: windows-2025
+          # Windows unit run temporarily disabled on the fork until we
+          # validate it on GH-hosted windows-2025 runners. Re-add when
+          # ready:
+          #   - name: windows
+          #     host: windows-2025
     runs-on: ${{ matrix.settings.host }}
     defaults:
       run:
@@ -110,8 +113,11 @@ jobs:
         settings:
           - name: linux
             host: ubuntu-24.04
-          - name: windows
-            host: windows-2025
+          # Windows e2e run temporarily disabled on the fork until we
+          # validate Playwright on GH-hosted windows-2025 runners.
+          # Re-add when ready:
+          #   - name: windows
+          #     host: windows-2025
     runs-on: ${{ matrix.settings.host }}
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright-browsers
