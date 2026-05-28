@@ -23,14 +23,6 @@ name: publish-ee
 on:
   push:
     branches: [opencode-cloud-agent/ee]
-  # TEMP: exercise the workflow on PRs against opencode-cloud-agent/ee
-  # so it can be smoke-tested before merge. WARNING: while this trigger
-  # is active, every push to a PR branch flips the floating :ee tag to
-  # the PR's HEAD binary. Remove this `pull_request:` block in a
-  # follow-up PR once the first successful run has verified the build +
-  # push path end-to-end.
-  pull_request:
-    branches: [opencode-cloud-agent/ee]
   workflow_dispatch:
 
 permissions:
