@@ -178,7 +178,12 @@ export function createChildStoreManager(input: {
         createRoot((dispose) => {
           const initialMeta = meta[0].value
           const initialIcon = icon[0].value
-          const [mcpEnabled, setMcpEnabled] = createSignal(false)
+          // Cloud-agent fork: default MCP on for every directory child.
+          // Upstream #28937 gated the MCP status query behind an explicit
+          // "open directory" toggle, but our pods globally configure MCP
+          // servers that should always be visible (the gating left the web
+          // UI's MCP list empty on pods even though /mcp returns servers).
+          const [mcpEnabled, setMcpEnabled] = createSignal(true)
 
           const [pathQuery, mcpQuery, lspQuery, providerQuery] = useQueries(() => ({
             queries: [

@@ -157,7 +157,7 @@ describe("createChildStoreManager", () => {
     }
   })
 
-  test("enables MCP only when requested for the directory", () => {
+  test("enables MCP by default for the directory (cloud-agent fork)", () => {
     let manager: ReturnType<typeof createChildStoreManager> | undefined
     const offset = queryGroups.length
     const mcpLoads: string[] = []
@@ -180,16 +180,19 @@ describe("createChildStoreManager", () => {
 
     try {
       if (!manager) throw new Error("manager required")
+      // Cloud-agent fork: the MCP query defaults to enabled so globally
+      // configured MCP servers are always visible (see child-store.ts).
       const [, setStore] = manager.child("/project", { bootstrap: false })
       const queries = queryGroups[offset]
       if (!queries) throw new Error("queries required")
-      expect(queries().queries[1]?.enabled).toBe(false)
+      expect(queries().queries[1]?.enabled).toBe(true)
 
       setStore("status", "complete")
       manager.child("/project", { bootstrap: false, mcp: true })
       expect(queries().queries[1]?.enabled).toBe(true)
       expect(mcpLoads).toEqual(["/project"])
 
+      // disableMcp still flips the directory off explicitly.
       manager.disableMcp("/project")
       expect(queries().queries[1]?.enabled).toBe(false)
       expect(manager.mcp("/project")).toBe(false)
