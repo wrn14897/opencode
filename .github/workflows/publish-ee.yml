@@ -44,13 +44,25 @@ jobs:
 
       - uses: ./.github/actions/setup-bun
 
-      # Cross-compile both linux targets (x64-baseline + arm64) referenced by
-      # Dockerfile.glibc. Bun's compile target list handles cross-arch
-      # natively — no QEMU needed at THIS step.
+      # Stamp a real published version (e.g. 1.15.13), not the git SHA.
+      # opencode installs @opencode-ai/plugin@<InstallationVersion> into every
+      # config dir; a SHA isn't on npm so it 404s and breaks the per-directory
+      # bootstrap (empty MCP list in the UI). The fork rebases on release tags,
+      # so package.json always matches a published version.
+      - name: Resolve opencode version from package.json
+        id: ocver
+        run: |
+          VERSION="$(node -p "require('./packages/opencode/package.json').version")"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      # Cross-compile both linux targets (x64-baseline + arm64) for
+      # Dockerfile.glibc. CHANNEL=latest -> prod UI (no DEV badge), non-local
+      # binary. Don't use CHANNEL=local: it forces dev/debug mode.
       - name: Build opencode binaries (cross-compile)
         run: bun packages/opencode/script/build.ts
         env:
-          OPENCODE_VERSION: ${{ github.sha }}
+          OPENCODE_VERSION: ${{ steps.ocver.outputs.version }}
+          OPENCODE_CHANNEL: latest
 
       # QEMU is needed for the docker build step, where Dockerfile.glibc's
       # `RUN opencode --version` smoke test must execute the arm64 binary.
