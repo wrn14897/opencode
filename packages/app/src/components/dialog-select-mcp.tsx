@@ -1,13 +1,10 @@
-import { useMutation, useQueryClient } from "@tanstack/solid-query"
 import { Component, createMemo, Show } from "solid-js"
 import { useSync } from "@/context/sync"
-import { useSDK } from "@/context/sdk"
 import { Dialog } from "@opencode-ai/ui/dialog"
 import { List } from "@opencode-ai/ui/list"
 import { Switch } from "@opencode-ai/ui/switch"
 import { useLanguage } from "@/context/language"
-import { useQueryOptions } from "@/context/server-sync"
-import { pathKey } from "@/utils/path-key"
+import { useMcpToggle } from "@/context/mcp"
 
 const statusLabels = {
   connected: "mcp.status.connected",
@@ -19,10 +16,7 @@ const statusLabels = {
 
 export const DialogSelectMcp: Component = () => {
   const sync = useSync()
-  const sdk = useSDK()
   const language = useLanguage()
-  const queryClient = useQueryClient()
-  const queryOptions = useQueryOptions()
 
   const items = createMemo(() =>
     Object.entries(sync.data.mcp ?? {})
@@ -30,35 +24,7 @@ export const DialogSelectMcp: Component = () => {
       .sort((a, b) => a.name.localeCompare(b.name)),
   )
 
-  const toggle = useMutation(() => ({
-    mutationFn: async (name: string) => {
-      const status = sync.data.mcp[name]
-      if (status?.status === "connected") {
-        await sdk.client.mcp.disconnect({ name })
-        return
-      }
-      if (status?.status === "needs_auth") {
-        // Cloud / web flow: ask the server for the authorize URL and
-        // open it in a new tab so the user can complete consent in their
-        // own browser. After the OAuth provider redirects back to our
-        // /mcp/oauth/callback endpoint, opencode's callback handler
-        // exchanges the code for tokens and the server's MCP status
-        // flips to "connected" on the next refetch.
-        //
-        // The native `mcp.auth.authenticate` path (which spawns a system
-        // browser via `open`) doesn't work in our containerised
-        // deployment, so we drive it explicitly here.
-        const resp = await sdk.client.mcp.auth.start({ name })
-        const url = (resp as any)?.data?.authorizationUrl ?? (resp as any)?.authorizationUrl
-        if (typeof url === "string" && url.length > 0) {
-          window.open(url, "_blank", "noopener,noreferrer")
-        }
-        return
-      }
-      await sdk.client.mcp.connect({ name })
-    },
-    onSuccess: () => queryClient.refetchQueries(queryOptions.mcp(pathKey(sync.directory))),
-  }))
+  const toggle = useMcpToggle()
 
   const enabledCount = createMemo(() => items().filter((i) => i.status === "connected").length)
   const totalCount = createMemo(() => items().length)

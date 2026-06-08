@@ -3,7 +3,6 @@ import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { Icon } from "@opencode-ai/ui/icon"
 import { Switch } from "@opencode-ai/ui/switch"
 import { Tabs } from "@opencode-ai/ui/tabs"
-import { useMutation, useQueryClient } from "@tanstack/solid-query"
 import { showToast } from "@/utils/toast"
 import { useNavigate } from "@solidjs/router"
 import { type Accessor, createEffect, createMemo, For, type JSXElement, onCleanup, Show } from "solid-js"
@@ -11,16 +10,12 @@ import { createStore } from "solid-js/store"
 import { ServerHealthIndicator, ServerRow } from "@/components/server/server-row"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
-import { useSDK } from "@/context/sdk"
-import { normalizeServerUrl, ServerConnection, useServer } from "@/context/server"
+import { ServerConnection, useServer } from "@/context/server"
 import { useSync } from "@/context/sync"
 import { type ServerHealth } from "@/utils/server-health"
-import { useQueryOptions } from "@/context/server-sync"
-import { pathKey } from "@/utils/path-key"
 import { useGlobal } from "@/context/global"
 import { useSettings } from "@/context/settings"
-
-const pollMs = 10_000
+import { useMcpToggle } from "@/context/mcp"
 
 const pluginEmptyMessage = (value: string, file: string): JSXElement => {
   const parts = value.split(file)
@@ -60,7 +55,7 @@ const useDefaultServerKey = (
   get: (() => string | Promise<string | null | undefined> | null | undefined) | undefined,
 ) => {
   const [state, setState] = createStore({
-    url: undefined as string | undefined,
+    key: undefined as ServerConnection.Key | undefined,
     tick: 0,
   })
 
@@ -69,7 +64,7 @@ const useDefaultServerKey = (
     let dead = false
     const result = get?.()
     if (!result) {
-      setState("url", undefined)
+      setState("key", undefined)
       onCleanup(() => {
         dead = true
       })
@@ -79,7 +74,7 @@ const useDefaultServerKey = (
     if (result instanceof Promise) {
       void result.then((next) => {
         if (dead) return
-        setState("url", next ? normalizeServerUrl(next) : undefined)
+        setState("key", next ?? undefined)
       })
       onCleanup(() => {
         dead = true
@@ -87,7 +82,7 @@ const useDefaultServerKey = (
       return
     }
 
-    setState("url", normalizeServerUrl(result))
+    setState("key", ServerConnection.Key.make(result))
     onCleanup(() => {
       dead = true
     })
@@ -95,54 +90,10 @@ const useDefaultServerKey = (
 
   return {
     key: () => {
-      const u = state.url
-      if (!u) return
-      return ServerConnection.key({ type: "http", http: { url: u } })
+      return state.key
     },
     refresh: () => setState("tick", (value) => value + 1),
   }
-}
-
-const useMcpToggleMutation = () => {
-  const sync = useSync()
-  const sdk = useSDK()
-  const language = useLanguage()
-  const queryClient = useQueryClient()
-  const queryOptions = useQueryOptions()
-
-  return useMutation(() => ({
-    mutationFn: async (name: string) => {
-      const status = sync.data.mcp[name]
-      if (status?.status === "connected") {
-        await sdk.client.mcp.disconnect({ name })
-        return
-      }
-      if (status?.status === "needs_auth") {
-        // Server-side has already detected the MCP needs OAuth. Start
-        // the dance and open the authorize URL in a new tab — the
-        // OAuth provider redirects back to our /mcp/oauth/callback
-        // endpoint when the user consents, after which the status
-        // flips to "connected" automatically. Native
-        // `mcp.auth.authenticate` (which spawns a system browser via
-        // `open`) doesn't work in our containerised deployment.
-        const resp = await sdk.client.mcp.auth.start({ name })
-        const url = (resp as any)?.data?.authorizationUrl ?? (resp as any)?.authorizationUrl
-        if (typeof url === "string" && url.length > 0) {
-          window.open(url, "_blank", "noopener,noreferrer")
-        }
-        return
-      }
-      await sdk.client.mcp.connect({ name })
-    },
-    onSuccess: () => queryClient.refetchQueries(queryOptions.mcp(pathKey(sync.directory))),
-    onError: (err) => {
-      showToast({
-        variant: "error",
-        title: language.t("common.requestFailed"),
-        description: err instanceof Error ? err.message : String(err),
-      })
-    },
-  }))
 }
 
 type ServerStatusState = {
@@ -171,7 +122,6 @@ export function StatusPopoverServerBody() {
   const dialog = useDialog()
   const language = useLanguage()
   const navigate = useNavigate()
-
   let dialogRun = 0
   let dialogDead = false
   onCleanup(() => {
@@ -327,7 +277,7 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
     dialogRun += 1
   })
   const sortedServers = createMemo(() => listServersByHealth(global.servers.list(), server.key, global.servers.health))
-  const toggleMcp = useMcpToggleMutation()
+  const toggleMcp = useMcpToggle()
   const defaultServer = useDefaultServerKey(platform.getDefaultServer)
   const mcpNames = createMemo(() => Object.keys(sync.data.mcp ?? {}).sort((a, b) => a.localeCompare(b)))
   const mcpStatus = (name: string) => sync.data.mcp?.[name]?.status
